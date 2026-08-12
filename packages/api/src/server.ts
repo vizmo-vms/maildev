@@ -432,6 +432,10 @@ export class APIServer extends EventEmitter {
         const { id } = request.params
         const baseUrl = request.headers.host ?? ''
 
+        // Preserve captured email HTML verbatim. In particular, this prevents
+        // Cloudflare from injecting email-obfuscation markup into the preview.
+        reply.header('Cache-Control', 'no-transform')
+
         try {
           if (this.smtp) {
             const html = await this.smtp.getEmailHtml(id, { baseUrl })

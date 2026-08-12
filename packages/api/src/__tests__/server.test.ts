@@ -141,6 +141,41 @@ describe('APIServer', () => {
       expect(email.subject).toBe('Another Test')
     })
 
+    it('should prevent intermediaries from transforming email HTML', async () => {
+      const testEmail: Email = {
+        id: 'html-email',
+        time: new Date(),
+        read: false,
+        subject: 'HTML Email',
+        html: '<p>recipient@example.com</p>',
+        source: '/path/to/email.eml',
+        size: 128,
+        sizeHuman: '128 B',
+        from: [{ address: 'sender@example.com' }],
+        to: [{ address: 'recipient@example.com' }],
+        headers: {},
+        attachments: [],
+        envelope: {
+          from: { address: 'sender@example.com' },
+          to: [{ address: 'recipient@example.com' }],
+        },
+        calculatedBcc: [],
+      }
+      await storage.save(testEmail)
+
+      server = createAPIServer({ storage, port: 0 })
+      await server.start()
+
+      const response = await server.server.inject({
+        method: 'GET',
+        url: '/api/email/html-email/html',
+      })
+
+      expect(response.statusCode).toBe(200)
+      expect(response.headers['cache-control']).toBe('no-transform')
+      expect(response.body).toBe(testEmail.html)
+    })
+
     it('should mark email as read when fetched', async () => {
       const testEmail: Email = {
         id: 'test-789',
