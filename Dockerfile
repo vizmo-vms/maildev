@@ -44,4 +44,4 @@ ENV MAILDEV_SMTP_PORT=1025
 ENTRYPOINT ["node", "dist/bin/maildev.js"]
 
 HEALTHCHECK --interval=10s --timeout=1s \
-  CMD wget -q -O - "http://localhost:${MAILDEV_WEB_PORT}${MAILDEV_BASE_PATHNAME}/api/healthz" || exit 1
+  CMD wget -q -O - "http://127.0.0.1:${MAILDEV_WEB_PORT}${MAILDEV_BASE_PATHNAME}/api/healthz" || exit 1

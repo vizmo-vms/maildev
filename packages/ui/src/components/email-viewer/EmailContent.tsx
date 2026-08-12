@@ -208,11 +208,12 @@ function HtmlContent({ html, viewport }: { html: string | undefined; viewport: s
         )}
         style={{ width: viewport, maxWidth: '100%' }}
       >
+        {/* Keep email scripts/forms blocked while allowing user-clicked links to open normally. */}
         <iframe
           ref={iframeRef}
           srcDoc={html}
           className="h-full w-full border-none bg-white"
-          sandbox="allow-same-origin"
+          sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
           title="Email HTML content"
           onLoad={handleIframeLoad}
         />
