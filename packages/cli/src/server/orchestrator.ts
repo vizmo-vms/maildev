@@ -89,6 +89,9 @@ export class Orchestrator {
     if (this.config.hideExtensions) {
       smtpOptions.hideExtensions = this.config.hideExtensions
     }
+    if (this.config.maxMessageSize !== undefined) {
+      smtpOptions.maxMessageSize = this.config.maxMessageSize
+    }
     this.smtp = createSMTPServer(smtpOptions)
 
     // 4. Configure relay if outgoing host is set
@@ -108,6 +111,33 @@ export class Orchestrator {
     // 6. Start SMTP server
     await this.smtp.start()
     this.logger.debug(`SMTP server started on ${this.config.ip}:${this.config.smtp}`)
+
+    // 6b. Keep the on-disk mail directory bounded when a limit is set: discard
+    // .eml files left over from previous runs beyond the limit. A directory
+    // that has accumulated messages across many sessions is the usual reason a
+    // long-lived MailDev becomes slow to start. Opt-in via --max-emails
+    // (0 = unlimited, the default), so it runs before the restore below and
+    // bounds how much there is to load back.
+    if (this.config.maxEmails > 0) {
+      this.logger.debug(
+        `Keeping at most ${this.config.maxEmails} emails (use --max-emails 0 for no limit)`
+      )
+      const pruned = await this.smtp.pruneMailDir(this.config.maxEmails)
+      if (pruned > 0) {
+        this.logger.info(`Removed ${pruned} old email(s) from ${mailDir}`)
+      }
+    }
+
+    // 6c. Restore persisted emails when a mail directory is configured, so mail
+    // survives restarts (e.g. across pod/container restarts with a mounted
+    // volume). Only when explicitly persisting — the tmpdir fallback is not
+    // restored to avoid resurrecting mail from unrelated previous runs. Only
+    // the newest maxEmails are loaded; loadMailsFromDirectory bounds this
+    // itself, matching the prune above.
+    if (this.config.mailDirectory) {
+      await this.smtp.loadMailsFromDirectory()
+      this.logger.debug('Restored persisted emails from mail directory')
+    }
 
     // 7. Set up email event handlers
     this.setupEmailHandlers()
@@ -130,6 +160,15 @@ export class Orchestrator {
       }
       if (this.config.verbose !== undefined) {
         apiOptions.logger = this.config.verbose
+      }
+      if (this.config.https) {
+        apiOptions.https = true
+        if (this.config.httpsCert) {
+          apiOptions.httpsCert = this.config.httpsCert
+        }
+        if (this.config.httpsKey) {
+          apiOptions.httpsKey = this.config.httpsKey
+        }
       }
       if (this.config.mcp) {
         apiOptions.mcp = { enabled: true }
@@ -212,14 +251,17 @@ export class Orchestrator {
    * Create storage instance based on config
    */
   private async createStorage(): Promise<Storage> {
+    const maxEmails = this.config.maxEmails
+
     if (this.config.mailDirectory) {
       this.logger.debug(`Using file storage: ${this.config.mailDirectory}`)
       return new FileStorage({
         mailDirectory: this.config.mailDirectory,
+        maxEmails,
       })
     }
     this.logger.debug('Using in-memory storage')
-    return new MemoryStorage()
+    return new MemoryStorage({ maxEmails })
   }
 
   /**

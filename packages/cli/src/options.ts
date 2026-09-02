@@ -49,6 +49,10 @@ export function configureOptions(program: Command): void {
       '--hide-extensions <extensions>',
       'Comma-separated SMTP extensions to hide (STARTTLS,PIPELINING,8BITMIME,SMTPUTF8)'
     )
+    .option(
+      '--max-message-size <bytes>',
+      `Maximum accepted message size in bytes, 0 to disable (default: ${DEFAULT_CONFIG.maxMessageSize})`
+    )
 
     // === Web/API Server Options ===
     .option(
@@ -123,6 +127,10 @@ export function configureOptions(program: Command): void {
       '--mail-directory <path>',
       'Directory to persist emails (uses in-memory storage if not set)'
     )
+    .option(
+      '--max-emails <count>',
+      `Maximum emails to keep; the oldest are discarded with their files (0 = unlimited) (default: ${DEFAULT_CONFIG.maxEmails})`
+    )
 
     // === Logging Options ===
     .option(
@@ -163,6 +171,8 @@ Environment Variables:
   MAILDEV_WEB_USER      Web auth username
   MAILDEV_WEB_PASS      Web auth password
   MAILDEV_MAIL_DIRECTORY Directory for persisting emails
+  MAILDEV_MAX_MESSAGE_SIZE Max accepted message size in bytes (default: 52428800)
+  MAILDEV_MAX_EMAILS    Maximum emails to keep (0 = unlimited, the default)
 `
 
 /**

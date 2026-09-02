@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { APIServer, createAPIServer } from '../server.js'
 import { MemoryStorage, type Email } from '@maildev/core'
 
@@ -213,6 +213,84 @@ describe('APIServer', () => {
       expect(saved?.read).toBe(true)
     })
 
+    it('should emit readMail over the socket only on the first open', async () => {
+      const testEmail: Email = {
+        id: 'socket-read',
+        time: new Date(),
+        read: false,
+        subject: 'Unread Email',
+        source: '/path/to/email.eml',
+        size: 512,
+        sizeHuman: '512 B',
+        from: [{ address: 'sender@test.com' }],
+        to: [{ address: 'recipient@test.com' }],
+        headers: {},
+        attachments: [],
+        envelope: {
+          from: { address: 'sender@test.com' },
+          to: [{ address: 'recipient@test.com' }],
+        },
+        calculatedBcc: [],
+      }
+      await storage.save(testEmail)
+
+      server = createAPIServer({ storage, port: 0 })
+      await server.start()
+
+      const emit = vi.fn()
+      // The socket only exists in SMTP mode; stand in a spy so the route's
+      // `this.io?.emit` is observable. `close` lets server.stop() tear it down.
+      ;(server as unknown as { io?: { emit: typeof emit; close: (cb: () => void) => void } }).io =
+        { emit, close: (cb) => cb() }
+
+      await server.server.inject({ method: 'GET', url: '/api/email/socket-read' })
+      expect(emit).toHaveBeenCalledWith('readMail', { id: 'socket-read' })
+
+      // Already read on the second open, so nothing is broadcast
+      emit.mockClear()
+      await server.server.inject({ method: 'GET', url: '/api/email/socket-read' })
+      expect(emit).not.toHaveBeenCalled()
+    })
+
+    it('should emit readAllMail only when read-all changed something', async () => {
+      const unread: Email = {
+        id: 'bulk-unread',
+        time: new Date(),
+        read: false,
+        subject: 'Unread',
+        source: '/path/to/email.eml',
+        size: 512,
+        sizeHuman: '512 B',
+        from: [{ address: 'sender@test.com' }],
+        to: [{ address: 'recipient@test.com' }],
+        headers: {},
+        attachments: [],
+        envelope: {
+          from: { address: 'sender@test.com' },
+          to: [{ address: 'recipient@test.com' }],
+        },
+        calculatedBcc: [],
+      }
+      await storage.save(unread)
+
+      server = createAPIServer({ storage, port: 0 })
+      await server.start()
+
+      const emit = vi.fn()
+      // The socket only exists in SMTP mode; stand in a spy so the route's
+      // `this.io?.emit` is observable. `close` lets server.stop() tear it down.
+      ;(server as unknown as { io?: { emit: typeof emit; close: (cb: () => void) => void } }).io =
+        { emit, close: (cb) => cb() }
+
+      await server.server.inject({ method: 'PATCH', url: '/api/email/read-all' })
+      expect(emit).toHaveBeenCalledWith('readAllMail')
+
+      // Everything is already read, so a second call changes nothing
+      emit.mockClear()
+      await server.server.inject({ method: 'PATCH', url: '/api/email/read-all' })
+      expect(emit).not.toHaveBeenCalled()
+    })
+
     it('should return 404 for non-existent email', async () => {
       server = createAPIServer({ storage, port: 0 })
       await server.start()
@@ -261,6 +339,116 @@ describe('APIServer', () => {
       // Verify deletion
       const deleted = await storage.getById('delete-me')
       expect(deleted).toBeUndefined()
+    })
+
+    it('should delete multiple emails on POST /email/delete', async () => {
+      const emails: Email[] = [
+        {
+          id: 'bulk-1',
+          time: new Date(),
+          read: false,
+          subject: 'Bulk Email 1',
+          source: '/path/1.eml',
+          size: 100,
+          sizeHuman: '100 B',
+          from: [{ address: 'a@test.com' }],
+          to: [{ address: 'b@test.com' }],
+          headers: {},
+          attachments: [],
+          envelope: { from: { address: 'a@test.com' }, to: [{ address: 'b@test.com' }] },
+          calculatedBcc: [],
+        },
+        {
+          id: 'bulk-2',
+          time: new Date(),
+          read: false,
+          subject: 'Bulk Email 2',
+          source: '/path/2.eml',
+          size: 200,
+          sizeHuman: '200 B',
+          from: [{ address: 'c@test.com' }],
+          to: [{ address: 'd@test.com' }],
+          headers: {},
+          attachments: [],
+          envelope: { from: { address: 'c@test.com' }, to: [{ address: 'd@test.com' }] },
+          calculatedBcc: [],
+        },
+        {
+          id: 'keep-me',
+          time: new Date(),
+          read: false,
+          subject: 'Keep Email',
+          source: '/path/3.eml',
+          size: 300,
+          sizeHuman: '300 B',
+          from: [{ address: 'e@test.com' }],
+          to: [{ address: 'f@test.com' }],
+          headers: {},
+          attachments: [],
+          envelope: { from: { address: 'e@test.com' }, to: [{ address: 'f@test.com' }] },
+          calculatedBcc: [],
+        },
+      ]
+
+      for (const email of emails) {
+        await storage.save(email)
+      }
+
+      server = createAPIServer({ storage, port: 0 })
+      await server.start()
+
+      const response = await server.server.inject({
+        method: 'POST',
+        url: '/api/email/delete',
+        payload: {
+          ids: ['bulk-1', 'bulk-2', 'bulk-1', 'missing'],
+        },
+      })
+
+      expect(response.statusCode).toBe(200)
+      expect(response.json()).toEqual({
+        deleted: ['bulk-1', 'bulk-2'],
+        notFound: ['missing'],
+      })
+
+      expect(await storage.getById('bulk-1')).toBeUndefined()
+      expect(await storage.getById('bulk-2')).toBeUndefined()
+      expect(await storage.getById('keep-me')).toBeDefined()
+    })
+
+    it('should reject invalid bulk delete payloads', async () => {
+      server = createAPIServer({ storage, port: 0 })
+      await server.start()
+
+      const missingBodyResponse = await server.server.inject({
+        method: 'POST',
+        url: '/api/email/delete',
+      })
+
+      expect(missingBodyResponse.statusCode).toBe(400)
+      expect(missingBodyResponse.json()).toEqual({
+        error: 'Request body must include an ids array of email IDs',
+      })
+
+      const invalidPayloads: Array<Record<string, unknown>> = [
+        {},
+        { ids: 'not-an-array' },
+        { ids: ['valid-id', ''] },
+        { ids: ['valid-id', 123] },
+      ]
+
+      for (const payload of invalidPayloads) {
+        const response = await server.server.inject({
+          method: 'POST',
+          url: '/api/email/delete',
+          payload,
+        })
+
+        expect(response.statusCode).toBe(400)
+        expect(response.json()).toEqual({
+          error: 'Request body must include an ids array of email IDs',
+        })
+      }
     })
 
     it('should delete all emails on DELETE /email/all', async () => {
@@ -540,6 +728,70 @@ describe('APIServer', () => {
       expect(body).toContain('"result"')
       expect(body).toContain('"serverInfo"')
       expect(body).toContain('"name":"maildev"')
+    })
+
+    it('should initialize multiple independent MCP sessions', async () => {
+      server = createAPIServer({ storage, port: 0, mcp: { enabled: true } })
+      await server.start()
+
+      const initPayload = {
+        method: 'POST' as const,
+        url: '/mcp',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json, text/event-stream',
+        },
+        payload: {
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'initialize',
+          params: {
+            protocolVersion: '2024-11-05',
+            capabilities: {},
+            clientInfo: { name: 'test', version: '1.0' },
+          },
+        },
+      }
+
+      // Each initialize spins up a fresh session bound to its own MCP server.
+      // Sharing a single server across sessions previously made the second
+      // connect() throw "Already connected to a transport".
+      const first = await server.server.inject(initPayload)
+      const second = await server.server.inject(initPayload)
+
+      expect(first.statusCode).toBe(200)
+      expect(second.statusCode).toBe(200)
+
+      const firstSession = first.headers['mcp-session-id']
+      const secondSession = second.headers['mcp-session-id']
+      expect(firstSession).toBeDefined()
+      expect(secondSession).toBeDefined()
+      expect(firstSession).not.toBe(secondSession)
+    })
+
+    it('should reject a request with an unknown session ID', async () => {
+      server = createAPIServer({ storage, port: 0, mcp: { enabled: true } })
+      await server.start()
+
+      const response = await server.server.inject({
+        method: 'POST',
+        url: '/mcp',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json, text/event-stream',
+          'mcp-session-id': 'does-not-exist',
+        },
+        payload: {
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/list',
+          params: {},
+        },
+      })
+
+      expect(response.statusCode).toBe(400)
+      const body = JSON.parse(response.body)
+      expect(body.error.message).toContain('No valid session ID')
     })
 
     it('should list MCP tools', async () => {

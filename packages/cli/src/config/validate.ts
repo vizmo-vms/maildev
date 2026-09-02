@@ -76,6 +76,14 @@ export function validateConfig(config: MailDevConfig): ValidationResult {
     if (outgoingPortError) errors.push(outgoingPortError)
   }
 
+  // Validate max message size (0 disables the limit)
+  if (!Number.isInteger(config.maxMessageSize) || config.maxMessageSize < 0) {
+    errors.push({
+      field: 'maxMessageSize',
+      message: 'maxMessageSize must be a non-negative integer (0 disables the limit)',
+    })
+  }
+
   // Validate TLS configuration
   if (config.incomingSecure) {
     if (!config.incomingCert) {
@@ -158,6 +166,14 @@ export function validateConfig(config: MailDevConfig): ValidationResult {
     errors.push({
       field: 'outgoing',
       message: 'Both outgoingUser and outgoingPass are required for relay authentication',
+    })
+  }
+
+  // Validate storage limit
+  if (!Number.isInteger(config.maxEmails) || config.maxEmails < 0) {
+    errors.push({
+      field: 'maxEmails',
+      message: 'maxEmails must be a non-negative integer (0 = unlimited)',
     })
   }
 

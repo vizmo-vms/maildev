@@ -15,6 +15,7 @@ const ENV_MAPPING: Record<string, keyof PartialMailDevConfig> = {
   MAILDEV_IP: 'ip',
   MAILDEV_INCOMING_USER: 'incomingUser',
   MAILDEV_INCOMING_PASS: 'incomingPass',
+  MAILDEV_MAX_MESSAGE_SIZE: 'maxMessageSize',
 
   // Web/API
   MAILDEV_WEB_PORT: 'web',
@@ -22,6 +23,9 @@ const ENV_MAPPING: Record<string, keyof PartialMailDevConfig> = {
   MAILDEV_WEB_USER: 'webUser',
   MAILDEV_WEB_PASS: 'webPass',
   MAILDEV_BASE_PATHNAME: 'basePathname',
+  MAILDEV_HTTPS: 'https',
+  MAILDEV_HTTPS_CERT: 'httpsCert',
+  MAILDEV_HTTPS_KEY: 'httpsKey',
 
   // Outgoing/Relay
   MAILDEV_OUTGOING_HOST: 'outgoingHost',
@@ -31,6 +35,7 @@ const ENV_MAPPING: Record<string, keyof PartialMailDevConfig> = {
 
   // Storage
   MAILDEV_MAIL_DIRECTORY: 'mailDirectory',
+  MAILDEV_MAX_EMAILS: 'maxEmails',
 
   // API URL (for MCP client mode)
   MAILDEV_API_URL: 'webIp', // Special handling needed
@@ -43,6 +48,8 @@ const NUMBER_VARS = new Set([
   'MAILDEV_SMTP_PORT',
   'MAILDEV_WEB_PORT',
   'MAILDEV_OUTGOING_PORT',
+  'MAILDEV_MAX_MESSAGE_SIZE',
+  'MAILDEV_MAX_EMAILS',
 ])
 
 /**

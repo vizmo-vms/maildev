@@ -1,18 +1,23 @@
 import { useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { io, Socket } from 'socket.io-client'
-import type { Email } from '@maildev/core'
+import type { EmailSummary } from '@maildev/core'
 import { useUIStore } from '../stores/ui'
+import { markSummaryRead } from './useEmails'
 import { getBasePath } from '../lib/basePath'
 
 // Notification debounce - max 1 notification per 2 seconds
 let lastNotificationTime = 0
 const NOTIFICATION_DEBOUNCE_MS = 2000
 
+// Collapse bursts of mail into a single refetch. Delivering a few hundred
+// emails in a second would otherwise queue up one refetch per email.
+const REFRESH_COALESCE_MS = 300
+
 /**
  * Show a browser notification for a new email
  */
-function showNotification(email: Email, onSelect: (id: string) => void) {
+function showNotification(email: EmailSummary, onSelect: (id: string) => void) {
   const now = Date.now()
   if (now - lastNotificationTime < NOTIFICATION_DEBOUNCE_MS) {
     return
@@ -76,6 +81,19 @@ export function useSocket() {
 
     socketRef.current = socket
 
+    // Trailing-edge coalescing: the first event schedules a refetch and any
+    // that arrive before it fires ride along with it.
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null
+    const scheduleRefresh = () => {
+      if (refreshTimer) {
+        return
+      }
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null
+        queryClient.invalidateQueries({ queryKey: ['emails'] })
+      }, REFRESH_COALESCE_MS)
+    }
+
     socket.on('connect', () => {
       console.log('Socket.io connected')
     })
@@ -84,31 +102,43 @@ export function useSocket() {
       console.log('Socket.io disconnected')
     })
 
-    socket.on('newMail', (email: Email) => {
-      console.log('New email received:', email.id)
-      // Invalidate and refetch emails
-      queryClient.invalidateQueries({ queryKey: ['emails'] })
+    socket.on('newMail', (email: EmailSummary) => {
+      scheduleRefresh()
 
       // Show browser notification if enabled
       if (notificationsEnabledRef.current) {
         showNotification(email, setSelectedEmailRef.current)
       }
 
-      // Auto-show new mail if enabled
+      // Auto-show new mail if enabled. Replace rather than push so a stream of
+      // arriving mail the user didn't act on doesn't flood browser history.
       if (autoShowNewMailRef.current) {
-        setSelectedEmailRef.current(email.id)
+        setSelectedEmailRef.current(email.id, { replace: true })
       }
     })
 
     socket.on('deleteMail', (data: { id: string; index?: number }) => {
-      console.log('Email deleted:', data.id)
-      // Invalidate and refetch emails
-      queryClient.invalidateQueries({ queryKey: ['emails'] })
+      scheduleRefresh()
       // Also invalidate the specific email query
       queryClient.invalidateQueries({ queryKey: ['email', data.id] })
     })
 
+    // Another tab opened an email: flip it read in our list without a refetch.
+    // Idempotent, so the tab that opened it (already updated) is a no-op.
+    socket.on('readMail', (data: { id: string }) => {
+      markSummaryRead(queryClient, data.id)
+    })
+
+    // Another tab marked everything read: a coalesced refetch is the cheapest
+    // way to pull in the new read state and the zeroed unread count.
+    socket.on('readAllMail', () => {
+      scheduleRefresh()
+    })
+
     return () => {
+      if (refreshTimer) {
+        clearTimeout(refreshTimer)
+      }
       socket.disconnect()
     }
   }, [queryClient])

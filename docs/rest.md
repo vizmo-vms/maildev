@@ -64,11 +64,16 @@ Returns:
 
 All paths are relative to the `/api` prefix.
 
+**GET    /api/email/summary** - Get a page of email summaries, newest first
+(see [Listing a large inbox](#listing-a-large-inbox))
+
 **GET    /api/email** - Get all emails (supports filtering and pagination)
 
 **GET    /api/email/:id** - Get a given email by id (marks it as read)
 
 **DELETE /api/email/:id** - Delete a given email by id
+
+**POST   /api/email/delete** - Delete multiple emails by id
 
 **DELETE /api/email/all** - Delete all emails
 
@@ -94,24 +99,106 @@ directory
 
 **GET    /api/healthz** - Health check
 
+## Bulk Delete
+
+The **POST /api/email/delete** endpoint deletes a specific set of emails in one
+request. The request body must include an `ids` array.
+
+```json
+{
+  "ids": ["XwgKAxto", "29wQJq2q"]
+}
+```
+
+It returns the IDs that were deleted and any IDs that were not found:
+
+```json
+{
+  "deleted": ["XwgKAxto"],
+  "notFound": ["29wQJq2q"]
+}
+```
+
 ## Real-time updates
 
 In addition to the REST API, the web server exposes a [Socket.IO](https://socket.io/)
 endpoint at `/socket.io` for real-time notifications. It emits a `newMail` event
 when an email arrives and a `deleteMail` event when one is removed.
 
-## Pagination
+The `newMail` payload is a summary (the same shape as
+**GET /api/email/summary** returns), not the full email — fetch
+**GET /api/email/:id** if you need the body.
 
-The **GET /api/email** endpoint allows for simple skip pagination.
+## Listing a large inbox
+
+**GET /api/email** returns every email in full, bodies included. That is
+convenient for a handful of messages and expensive for thousands: a 10,000
+email inbox serialises to well over 100 MB.
+
+**GET /api/email/summary** returns a bounded page of summaries instead — no
+`html`, `text` or `headers` — along with the counts needed to paginate. This is
+what the web interface uses.
 
 ```plaintext
-GET /api/email?skip=10
+GET /api/email/summary?skip=0&limit=50&search=welcome&sort=desc&unread=true
+```
+
+| Parameter | Default | Description                                            |
+| --------- | ------- | ------------------------------------------------------ |
+| `skip`    | `0`     | Matching emails to skip                                 |
+| `limit`   | `50`    | Page size, clamped to 200                               |
+| `search`  | —       | Case-insensitive match on subject, participants, body   |
+| `sort`    | `desc`  | `desc` for newest first, `asc` for oldest first         |
+| `unread`  | —       | `true` to return only unread emails                     |
+
+```json
+{
+  "items": [
+    {
+      "id": "abc123",
+      "time": "2026-07-27T09:12:44.000Z",
+      "read": false,
+      "subject": "The ex-presidents are surfers",
+      "size": 3072,
+      "sizeHuman": "3 KB",
+      "from": [{ "address": "angelo.pappas@fbi.gov", "name": "Angelo Pappas" }],
+      "to": [{ "address": "johnny.utah@fbi.gov", "name": "Johnny Utah" }],
+      "attachmentCount": 1,
+      "preview": "The wax at the bank was surfer wax!!!"
+    }
+  ],
+  "total": 1024,
+  "storeTotal": 1024,
+  "unread": 17,
+  "skip": 0,
+  "limit": 50
+}
+```
+
+`total` counts the emails matching `search`; `storeTotal` and `unread` describe
+the whole store and ignore the search.
+
+## Pagination
+
+The **GET /api/email** endpoint allows for simple skip/limit pagination.
+
+```plaintext
+GET /api/email?skip=10&limit=25
+```
+
+Without `limit` it returns every email from `skip` onwards. Emails come back in
+arrival order unless `sort` is given, in which case they are ordered by received
+time — `sort=desc` for newest first, `sort=asc` for oldest first. Combine it with
+`limit` to fetch the most recent emails:
+
+```plaintext
+GET /api/email?limit=25&sort=desc
 ```
 
 ## Filtering
 
 The **GET /api/email** endpoint allows simple filtering. Any query parameter
-that isn't a reserved keyword (like `skip`) is treated as an exact-match filter
+that isn't a reserved keyword (`skip`, `limit`) is treated as an exact-match filter
 against a field of the returned email. Nested fields can be addressed with dot
 syntax (`from.address=value`).
 

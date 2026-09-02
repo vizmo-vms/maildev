@@ -4,11 +4,10 @@ import {
   useDeleteAllEmails,
   useMarkAllRead,
   useConfig,
-  useEmails,
+  useEmailList,
 } from './useEmails'
 import { useUIStore } from '../stores/ui'
 import { api } from '../lib/api'
-import type { Email } from '@maildev/core'
 
 export interface Command {
   id: string
@@ -183,7 +182,7 @@ export function useCommands(): Command[] {
   const deleteAllMutation = useDeleteAllEmails()
   const markAllReadMutation = useMarkAllRead()
   const { data: config } = useConfig()
-  const { data: emails = [] } = useEmails()
+  const { items: emailList } = useEmailList()
 
   const selectedEmailId = useUIStore((s) => s.selectedEmailId)
   const setSelectedEmail = useUIStore((s) => s.setSelectedEmail)
@@ -196,7 +195,6 @@ export function useCommands(): Command[] {
   const setSearchQuery = useUIStore((s) => s.setSearchQuery)
 
   return useMemo(() => {
-    const emailList = emails as Email[]
     const currentIndex = emailList.findIndex((e) => e.id === selectedEmailId)
 
     const commands: Command[] = [
@@ -257,7 +255,9 @@ export function useCommands(): Command[] {
         action: () => {
           if (selectedEmailId && window.confirm('Delete this email?')) {
             api.emails.delete(selectedEmailId).then(() => {
-              setSelectedEmail(null)
+              // The deleted email's route is gone; replace so Back doesn't
+              // return to a now-404 selection.
+              setSelectedEmail(null, { replace: true })
               refresh()
             })
           }
@@ -302,7 +302,7 @@ export function useCommands(): Command[] {
         action: () => {
           if (emailList.length > 0) {
             const nextIndex = currentIndex < emailList.length - 1 ? currentIndex + 1 : 0
-            setSelectedEmail(emailList[nextIndex].id)
+            setSelectedEmail(emailList[nextIndex]!.id)
           }
         },
         keywords: ['down', 'forward'],
@@ -318,7 +318,7 @@ export function useCommands(): Command[] {
         action: () => {
           if (emailList.length > 0) {
             const prevIndex = currentIndex > 0 ? currentIndex - 1 : emailList.length - 1
-            setSelectedEmail(emailList[prevIndex].id)
+            setSelectedEmail(emailList[prevIndex]!.id)
           }
         },
         keywords: ['up', 'back'],
@@ -392,7 +392,7 @@ export function useCommands(): Command[] {
     deleteAllMutation,
     markAllReadMutation,
     config,
-    emails,
+    emailList,
     selectedEmailId,
     setSelectedEmail,
     toggleTheme,

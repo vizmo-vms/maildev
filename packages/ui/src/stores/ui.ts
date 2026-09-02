@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { parseEmailRoute, updateEmailRoute } from '../lib/emailRoute'
 
 interface UIState {
   /** Currently selected email ID */
@@ -14,17 +15,21 @@ interface UIState {
   notificationsEnabled: boolean
   /** Auto-show new emails when they arrive */
   autoShowNewMail: boolean
+  /** Show the top loading bar during background refreshes */
+  loadingBarEnabled: boolean
   /** Command palette open state */
   commandPaletteOpen: boolean
 
   // Actions
-  setSelectedEmail: (id: string | null) => void
+  setSelectedEmail: (id: string | null, options?: { replace?: boolean }) => void
+  syncSelectedEmailFromRoute: (id: string | null) => void
   toggleTheme: () => void
   setTheme: (theme: 'light' | 'dark') => void
   setSearchQuery: (query: string) => void
   toggleSidebar: () => void
   setNotificationsEnabled: (enabled: boolean) => void
   setAutoShowNewMail: (enabled: boolean) => void
+  setLoadingBarEnabled: (enabled: boolean) => void
   openCommandPalette: () => void
   closeCommandPalette: () => void
 }
@@ -32,15 +37,21 @@ interface UIState {
 export const useUIStore = create<UIState>()(
   persist(
     (set) => ({
-      selectedEmailId: null,
+      selectedEmailId: typeof window === 'undefined' ? null : parseEmailRoute(window.location.hash),
       theme: 'light',
       searchQuery: '',
       sidebarCollapsed: false,
       notificationsEnabled: false,
       autoShowNewMail: false,
+      loadingBarEnabled: true,
       commandPaletteOpen: false,
 
-      setSelectedEmail: (id) => set({ selectedEmailId: id }),
+      setSelectedEmail: (id, options) => {
+        set({ selectedEmailId: id })
+        updateEmailRoute(id, options)
+      },
+
+      syncSelectedEmailFromRoute: (id) => set({ selectedEmailId: id }),
 
       toggleTheme: () =>
         set((state) => ({
@@ -60,6 +71,8 @@ export const useUIStore = create<UIState>()(
 
       setAutoShowNewMail: (enabled) => set({ autoShowNewMail: enabled }),
 
+      setLoadingBarEnabled: (enabled) => set({ loadingBarEnabled: enabled }),
+
       openCommandPalette: () => set({ commandPaletteOpen: true }),
 
       closeCommandPalette: () => set({ commandPaletteOpen: false }),
@@ -71,6 +84,7 @@ export const useUIStore = create<UIState>()(
         sidebarCollapsed: state.sidebarCollapsed,
         notificationsEnabled: state.notificationsEnabled,
         autoShowNewMail: state.autoShowNewMail,
+        loadingBarEnabled: state.loadingBarEnabled,
       }),
     }
   )

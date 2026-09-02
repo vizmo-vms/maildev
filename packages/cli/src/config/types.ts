@@ -121,6 +121,17 @@ export interface MailDevConfig {
    */
   hideExtensions?: HideableExtension[]
 
+  /**
+   * Maximum accepted message size in bytes. Larger messages are rejected
+   * before being parsed or stored. The SIZE extension is advertised so
+   * well-behaved clients skip oversized messages. Set to 0 to disable the
+   * limit.
+   * CLI: --max-message-size <bytes>
+   * Env: MAILDEV_MAX_MESSAGE_SIZE
+   * @default 52428800 (50 MB)
+   */
+  maxMessageSize: number
+
   // === Web/API Server Options ===
 
   /**
@@ -236,6 +247,20 @@ export interface MailDevConfig {
    */
   mailDirectory?: string
 
+  /**
+   * Maximum number of emails to keep (0 = unlimited, the default)
+   *
+   * Defaults to 0, preserving MailDev's historical unbounded behaviour. Set a
+   * positive number to cap the store: once the limit is reached the oldest
+   * email is dropped, and its .eml file and attachments are deleted along with
+   * it, so both memory use and the mail directory stay bounded.
+   *
+   * CLI: --max-emails <count>
+   * Env: MAILDEV_MAX_EMAILS
+   * @default 0
+   */
+  maxEmails: number
+
   // === Logging Options ===
 
   /**
@@ -290,6 +315,7 @@ export interface CLIOptions {
   incomingCert?: string
   incomingKey?: string
   hideExtensions?: string
+  maxMessageSize?: string
   web?: string
   webIp?: string
   webUser?: string
@@ -307,6 +333,7 @@ export interface CLIOptions {
   autoRelay?: boolean | string
   autoRelayRules?: string
   mailDirectory?: string
+  maxEmails?: string
   verbose?: boolean
   silent?: boolean
   logMailContents?: boolean

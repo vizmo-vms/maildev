@@ -25,10 +25,15 @@ RUN pnpm install --frozen-lockfile
 # Build every package (tsc for core/smtp/api/mcp/cli, Vite for the UI), then
 # `pnpm deploy` the CLI package + its @maildev/* workspace deps into an isolated,
 # production-only tree at /prod (no dev deps, no source, no other packages).
+# On pnpm 10 `pnpm deploy` requires injected workspace packages, otherwise it
+# errors with ERR_PNPM_DEPLOY_NONINJECTED_WORKSPACE. We enable injection for
+# just this command (not globally in .npmrc) so the deployed tree gets real,
+# hard-copied @maildev/* deps while normal `pnpm install`/`pnpm dev` keep using
+# symlinks for live cross-package rebuilds.
 FROM deps AS build
 WORKDIR /workspace
 RUN pnpm build
-RUN pnpm --filter=maildev deploy --prod /prod
+RUN pnpm --filter=maildev deploy --prod --config.inject-workspace-packages=true /prod
 
 # ── Production ───────────────────────────────────────────────────────────────
 FROM base AS prod
@@ -43,5 +48,5 @@ ENV MAILDEV_SMTP_PORT=1025
 
 ENTRYPOINT ["node", "dist/bin/maildev.js"]
 
-HEALTHCHECK --interval=10s --timeout=1s \
-  CMD wget -q -O - "http://127.0.0.1:${MAILDEV_WEB_PORT}${MAILDEV_BASE_PATHNAME}/api/healthz" || exit 1
+HEALTHCHECK --interval=10s --timeout=5s --start-period=5s --retries=3 \
+  CMD ["node", "dist/bin/healthcheck.js"]

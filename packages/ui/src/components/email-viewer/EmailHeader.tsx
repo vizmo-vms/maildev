@@ -50,6 +50,7 @@ export function EmailHeader({ email }: EmailHeaderProps) {
   }, [])
 
   const fromAddress = email.from?.[0]?.address ?? 'unknown'
+  const fromDisplay = email.from?.[0] ? formatEmailAddress(email.from[0]) : fromAddress
   const toAddresses = email.to?.map(formatEmailAddress).join(', ') ?? ''
   const ccAddresses = email.cc?.map(formatEmailAddress).join(', ')
   const bccAddresses = email.calculatedBcc?.map(formatEmailAddress).join(', ')
@@ -111,32 +112,28 @@ export function EmailHeader({ email }: EmailHeaderProps) {
 
           {/* Email info */}
           <div className="min-w-0 flex-1">
-            <h1 className="text-lg font-semibold text-[hsl(var(--foreground))]">
+            <h1 data-testid="email-subject" className="text-lg font-semibold text-[hsl(var(--foreground))]">
               {email.subject || '(no subject)'}
             </h1>
             <div className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
-              <div className="flex flex-wrap items-center gap-x-2">
-                <span className="font-medium text-[hsl(var(--foreground))]">
-                  {email.from?.[0]?.name || fromAddress}
-                </span>
-                {email.from?.[0]?.name && (
-                  <span className="text-xs">&lt;{fromAddress}&gt;</span>
-                )}
+              <div>
+                <span className="font-medium text-[hsl(var(--foreground))]">from </span>
+                <span>{fromDisplay}</span>
               </div>
               <div className="mt-0.5">
-                <span className="text-xs">to </span>
-                <span className="text-xs">{toAddresses}</span>
+                <span className="font-medium text-[hsl(var(--foreground))]">to </span>
+                <span>{toAddresses}</span>
               </div>
               {ccAddresses && (
                 <div className="mt-0.5">
-                  <span className="text-xs">cc </span>
-                  <span className="text-xs">{ccAddresses}</span>
+                  <span className="font-medium text-[hsl(var(--foreground))]">cc </span>
+                  <span>{ccAddresses}</span>
                 </div>
               )}
               {bccAddresses && (
                 <div className="mt-0.5">
-                  <span className="text-xs">bcc </span>
-                  <span className="text-xs">{bccAddresses}</span>
+                  <span className="font-medium text-[hsl(var(--foreground))]">bcc </span>
+                  <span>{bccAddresses}</span>
                 </div>
               )}
             </div>
@@ -155,6 +152,7 @@ export function EmailHeader({ email }: EmailHeaderProps) {
               onClick={handleDownload}
               className="rounded-md p-2 hover:bg-[hsl(var(--muted))]"
               aria-label="Download email"
+              data-testid="download-email-button"
             >
               <svg
                 className="h-4 w-4"
@@ -299,6 +297,7 @@ export function EmailHeader({ email }: EmailHeaderProps) {
                 'disabled:cursor-not-allowed disabled:opacity-50'
               )}
               aria-label="Delete email"
+              data-testid="delete-email-button"
             >
               <svg
                 className="h-4 w-4"
@@ -320,13 +319,14 @@ export function EmailHeader({ email }: EmailHeaderProps) {
 
       {/* Attachments */}
       {email.attachments && email.attachments.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-2">
+        <div data-testid="email-attachments" className="mt-3 flex flex-wrap gap-2">
           {email.attachments.map((attachment, index) => (
             <Tooltip key={index} content={`Download ${attachment.filename ?? 'attachment'}`}>
               <a
                 href={api.emails.attachmentUrl(email.id, attachment.generatedFileName)}
                 target="_blank"
                 rel="noopener noreferrer"
+                data-testid="email-attachment"
                 className={cn(
                   'inline-flex items-center gap-1.5 rounded-md border border-[hsl(var(--border))]',
                   'px-2 py-1 text-xs text-[hsl(var(--foreground))]',

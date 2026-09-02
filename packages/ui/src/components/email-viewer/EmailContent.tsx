@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import type { Email } from '@maildev/core'
 import { useEmailHtml, useEmailSource } from '../../hooks/useEmails'
 import { cn } from '../../lib/utils'
@@ -95,7 +95,12 @@ export function EmailContent({ email }: EmailContentProps) {
                 <ViewportIcon type={currentViewport.icon} />
                 <span>{currentViewport.label}</span>
                 <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 9l-7 7-7-7"
+                  />
                 </svg>
               </button>
             </Tooltip>
@@ -121,8 +126,18 @@ export function EmailContent({ email }: EmailContentProps) {
                     <ViewportIcon type={option.icon} />
                     <span>{option.label}</span>
                     {viewport === option.value && (
-                      <svg className="ml-auto h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      <svg
+                        className="ml-auto h-4 w-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M5 13l4 4L19 7"
+                        />
                       </svg>
                     )}
                   </button>
@@ -147,18 +162,122 @@ export function EmailContent({ email }: EmailContentProps) {
 }
 
 // Keys that should be forwarded from iframe to parent for keyboard shortcuts
-const FORWARDED_KEYS = new Set(['j', 'k', 'r', 's', 'a', 'c', '/', '?', 'Escape', 'Delete', 'Backspace'])
+const FORWARDED_KEYS = new Set([
+  'j',
+  'k',
+  'r',
+  's',
+  'a',
+  'c',
+  '/',
+  '?',
+  'Escape',
+  'Delete',
+  'Backspace',
+])
+
+export function getEmailDocumentHeight(doc: Document): number {
+  const { body, documentElement } = doc
+  if (!body || !documentElement) {
+    return 0
+  }
+
+  const bodyTop = body.getBoundingClientRect().top
+  const childBottom = Array.from(body.children).reduce((max, child) => {
+    const rect = child.getBoundingClientRect()
+    return Math.max(max, rect.bottom - bodyTop)
+  }, 0)
+  const bodyStyle = doc.defaultView?.getComputedStyle(body)
+  const bodyMarginBottom = bodyStyle ? parseFloat(bodyStyle.marginBottom) || 0 : 0
+
+  // NB: documentElement.clientHeight is intentionally omitted — for the root
+  // element it reports the iframe's own viewport height (i.e. whatever height
+  // we last set), which would ratchet the measurement up and prevent it from
+  // ever shrinking to fit shorter content.
+  return Math.ceil(
+    Math.max(
+      documentElement.scrollHeight,
+      documentElement.offsetHeight,
+      body.scrollHeight,
+      body.offsetHeight,
+      childBottom + bodyMarginBottom
+    )
+  )
+}
 
 function HtmlContent({ html, viewport }: { html: string | undefined; viewport: string }) {
   const iframeRef = useRef<HTMLIFrameElement>(null)
+  const resizeFrameRef = useRef<number | null>(null)
+  const iframeCleanupRef = useRef<(() => void) | null>(null)
+  const [iframeHeight, setIframeHeight] = useState<number | null>(null)
 
-  // Forward keyboard shortcuts from iframe to parent window
-  const handleIframeLoad = () => {
+  const updateIframeHeight = useCallback(() => {
     const iframe = iframeRef.current
-    if (!iframe?.contentWindow) return
+    const doc = iframe?.contentDocument
+    if (!doc) {
+      return
+    }
+
+    const nextHeight = getEmailDocumentHeight(doc)
+    if (nextHeight > 0) {
+      setIframeHeight((currentHeight) =>
+        currentHeight === nextHeight ? currentHeight : nextHeight
+      )
+    }
+  }, [])
+
+  const scheduleIframeResize = useCallback(() => {
+    if (resizeFrameRef.current !== null) {
+      window.cancelAnimationFrame(resizeFrameRef.current)
+    }
+
+    resizeFrameRef.current = window.requestAnimationFrame(() => {
+      resizeFrameRef.current = null
+      updateIframeHeight()
+    })
+  }, [updateIframeHeight])
+
+  const cleanupIframe = useCallback(() => {
+    iframeCleanupRef.current?.()
+    iframeCleanupRef.current = null
+
+    if (resizeFrameRef.current !== null) {
+      window.cancelAnimationFrame(resizeFrameRef.current)
+      resizeFrameRef.current = null
+    }
+  }, [])
+
+  useEffect(() => cleanupIframe, [cleanupIframe])
+
+  // Changing the email swaps the iframe's srcDoc, which reloads it and fires
+  // onLoad -> handleIframeLoad re-attaches listeners. Reset the height so the
+  // new content is measured from scratch.
+  useEffect(() => {
+    cleanupIframe()
+    setIframeHeight(null)
+  }, [cleanupIframe, html])
+
+  // Changing the viewport only resizes the existing iframe; it does NOT reload
+  // it, so onLoad never fires again. Keep the already-attached listeners in
+  // place and just re-measure for the new width. (We deliberately do NOT reset
+  // the height to null first: the reset raced the measurement rAF so it never
+  // shrank anyway, and it caused a one-frame collapse that lost scroll position.)
+  useEffect(() => {
+    scheduleIframeResize()
+  }, [scheduleIframeResize, viewport])
+
+  // Forward keyboard shortcuts from iframe to parent window and observe the
+  // loaded document so the iframe height tracks its content.
+  const setupIframe = useCallback(() => {
+    const iframe = iframeRef.current
+    const iframeWindow = iframe?.contentWindow
+    const iframeDocument = iframe?.contentDocument
+    if (!iframeWindow || !iframeDocument) return
+
+    const cleanupCallbacks: (() => void)[] = []
 
     try {
-      iframe.contentWindow.addEventListener('keydown', (e: KeyboardEvent) => {
+      const handleKeyDown = (e: KeyboardEvent) => {
         // Forward Cmd+K / Ctrl+K to parent (command palette)
         if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
           e.preventDefault()
@@ -183,11 +302,65 @@ function HtmlContent({ html, viewport }: { html: string | undefined; viewport: s
             })
           )
         }
+      }
+
+      iframeWindow.addEventListener('keydown', handleKeyDown)
+      cleanupCallbacks.push(() => iframeWindow.removeEventListener('keydown', handleKeyDown))
+
+      iframeWindow.addEventListener('resize', scheduleIframeResize)
+      cleanupCallbacks.push(() => iframeWindow.removeEventListener('resize', scheduleIframeResize))
+
+      if (typeof ResizeObserver !== 'undefined') {
+        const resizeObserver = new ResizeObserver(scheduleIframeResize)
+        resizeObserver.observe(iframeDocument.documentElement)
+        if (iframeDocument.body) {
+          resizeObserver.observe(iframeDocument.body)
+        }
+        cleanupCallbacks.push(() => resizeObserver.disconnect())
+      }
+
+      for (const image of Array.from(iframeDocument.images)) {
+        image.addEventListener('load', scheduleIframeResize)
+        image.addEventListener('error', scheduleIframeResize)
+        cleanupCallbacks.push(() => {
+          image.removeEventListener('load', scheduleIframeResize)
+          image.removeEventListener('error', scheduleIframeResize)
+        })
+      }
+
+      const fonts = (
+        iframeDocument as Document & {
+          fonts?: { ready?: Promise<unknown> }
+        }
+      ).fonts
+      // A promise can't be cancelled, so gate the callback behind a disposed
+      // flag tied to this iframe's cleanup — otherwise a late font load could
+      // resize a torn-down or already-replaced iframe.
+      let fontsDisposed = false
+      cleanupCallbacks.push(() => {
+        fontsDisposed = true
       })
+      fonts?.ready
+        ?.then(() => {
+          if (!fontsDisposed) scheduleIframeResize()
+        })
+        .catch(() => undefined)
     } catch {
       // Ignore cross-origin errors (shouldn't happen with srcdoc)
     }
-  }
+
+    iframeCleanupRef.current = () => {
+      for (const cleanup of cleanupCallbacks) {
+        cleanup()
+      }
+    }
+    scheduleIframeResize()
+  }, [scheduleIframeResize])
+
+  const handleIframeLoad = useCallback(() => {
+    cleanupIframe()
+    setupIframe()
+  }, [cleanupIframe, setupIframe])
 
   if (!html) {
     return (
@@ -200,10 +373,10 @@ function HtmlContent({ html, viewport }: { html: string | undefined; viewport: s
   const isFullWidth = viewport === '100%'
 
   return (
-    <div className={cn('h-full', isFullWidth ? 'w-full' : 'flex justify-center p-4')}>
+    <div className={cn('min-h-full', isFullWidth ? 'w-full' : 'flex justify-center p-4')}>
       <div
         className={cn(
-          'h-full bg-white',
+          'min-h-full bg-white',
           !isFullWidth && 'border border-[hsl(var(--border))] shadow-sm'
         )}
         style={{ width: viewport, maxWidth: '100%' }}
@@ -212,7 +385,10 @@ function HtmlContent({ html, viewport }: { html: string | undefined; viewport: s
         <iframe
           ref={iframeRef}
           srcDoc={html}
-          className="h-full w-full border-none bg-white"
+          className="block min-h-full w-full border-none bg-white"
+          style={{
+            height: iframeHeight ? `${iframeHeight}px` : '100%',
+          }}
           sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
           title="Email HTML content"
           onLoad={handleIframeLoad}
@@ -226,20 +402,35 @@ function ViewportIcon({ type }: { type: 'desktop' | 'tablet' | 'mobile' }) {
   if (type === 'desktop') {
     return (
       <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+        />
       </svg>
     )
   }
   if (type === 'tablet') {
     return (
       <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M12 18h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"
+        />
       </svg>
     )
   }
   return (
     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"
+      />
     </svg>
   )
 }

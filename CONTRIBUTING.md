@@ -20,7 +20,7 @@ The root `package.json` is `private` (legacy v2 code) and is **not** published.
 ## Prerequisites
 
 - Node.js `>=20`
-- [pnpm](https://pnpm.io) `9.15.4` (pinned via `packageManager`)
+- [pnpm](https://pnpm.io) `10.34.4` (pinned via `packageManager`)
 
 ## Development
 
@@ -32,7 +32,7 @@ pnpm dev       # turbo run dev — starts every package concurrently
 `pnpm dev` launches each package's `dev` task at once:
 
 - **`@maildev/api`** → `tsx watch src/dev.ts`, booting the full backend (SMTP + REST API + WebSocket) in one process
-- **`@maildev/ui`** → `vite` dev server for the React UI
+- **`@maildev/ui`** → `vite` dev server for the React UI (runs on `http://localhost:5173` vite port during development)
 - `core`, `smtp`, `cli` → `tsc --watch` for incremental rebuilds
 
 Default endpoints:

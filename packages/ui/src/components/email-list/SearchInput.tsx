@@ -1,9 +1,8 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useUIStore } from '../../stores/ui'
-import { useEmails, filterEmails } from '../../hooks/useEmails'
+import { useEmailList } from '../../hooks/useEmails'
 import { cn } from '../../lib/utils'
 import { Tooltip } from '../ui/Tooltip'
-import type { Email } from '@maildev/core'
 
 export function SearchInput() {
   const searchQuery = useUIStore((state) => state.searchQuery)
@@ -11,18 +10,9 @@ export function SearchInput() {
   const selectedEmailId = useUIStore((state) => state.selectedEmailId)
   const setSelectedEmail = useUIStore((state) => state.setSelectedEmail)
   const [isFocused, setIsFocused] = useState(false)
-  const { data: emails = [] } = useEmails()
+  // Already filtered and sorted by the server
+  const { items: visibleEmails } = useEmailList()
   const prevSearchQueryRef = useRef(searchQuery)
-
-  // Filter and sort emails the same way as the list
-  const visibleEmails = useMemo(() => {
-    const filtered = filterEmails(emails as Email[], searchQuery)
-    return [...filtered].sort((a, b) => {
-      const timeA = new Date(a.time).getTime()
-      const timeB = new Date(b.time).getTime()
-      return timeB - timeA
-    })
-  }, [emails, searchQuery])
 
   // Auto-select first email when search query changes (and there are results)
   useEffect(() => {
@@ -30,7 +20,9 @@ export function SearchInput() {
     if (searchQuery !== prevSearchQueryRef.current) {
       prevSearchQueryRef.current = searchQuery
       if (searchQuery && visibleEmails.length > 0) {
-        setSelectedEmail(visibleEmails[0].id)
+        // Auto-selecting the top match as the user types is a side-effect of
+        // filtering, not deliberate navigation, so replace instead of push.
+        setSelectedEmail(visibleEmails[0]!.id, { replace: true })
       }
     }
   }, [searchQuery, visibleEmails, setSelectedEmail])
@@ -44,11 +36,11 @@ export function SearchInput() {
     if (e.key === 'ArrowDown') {
       e.preventDefault()
       const nextIndex = currentIndex < visibleEmails.length - 1 ? currentIndex + 1 : 0
-      setSelectedEmail(visibleEmails[nextIndex].id)
+      setSelectedEmail(visibleEmails[nextIndex]!.id)
     } else if (e.key === 'ArrowUp') {
       e.preventDefault()
       const prevIndex = currentIndex > 0 ? currentIndex - 1 : visibleEmails.length - 1
-      setSelectedEmail(visibleEmails[prevIndex].id)
+      setSelectedEmail(visibleEmails[prevIndex]!.id)
     } else if (e.key === 'Escape') {
       // Blur the input on Escape
       e.currentTarget.blur()
@@ -78,6 +70,7 @@ export function SearchInput() {
         onFocus={() => setIsFocused(true)}
         onBlur={() => setIsFocused(false)}
         placeholder="Search emails..."
+        data-testid="search-input"
         className={cn(
           'w-full rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))]',
           'py-2 pl-10 pr-10 text-sm',
@@ -99,6 +92,7 @@ export function SearchInput() {
               onClick={() => setSearchQuery('')}
               className="rounded-sm p-0.5 hover:bg-[hsl(var(--muted))]"
               aria-label="Clear search"
+              data-testid="search-clear-button"
             >
               <svg
                 className="h-4 w-4 text-[hsl(var(--muted-foreground))]"
